@@ -1,131 +1,28 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-2.0+
-#
-# Author: Justin Iurman <justin.iurman@uliege.be>
-#
-# This script evaluates the IOAM insertion for IPv6 by checking the IOAM data
-# consistency directly inside packets on the receiver side. Tests are divided
-# into three categories: OUTPUT (evaluates the IOAM processing by the sender),
-# INPUT (evaluates the IOAM processing by a receiver) and GLOBAL (evaluates
-# wider use cases that do not fall into the other two categories). Both OUTPUT
-# and INPUT tests only use a two-node topology (alpha and beta), while GLOBAL
-# tests use the entire three-node topology (alpha, beta, gamma). Each test is
-# documented inside its own handler in the code below.
-#
-# An IOAM domain is configured from Alpha to Gamma but not on the reverse path.
-# When either Beta or Gamma is the destination (depending on the test category),
-# Alpha adds an IOAM option (Pre-allocated Trace) inside a Hop-by-hop.
-#
-#
-#            +-------------------+            +-------------------+
-#            |                   |            |                   |
-#            |    Alpha netns    |            |    Gamma netns    |
-#            |                   |            |                   |
-#            |  +-------------+  |            |  +-------------+  |
-#            |  |    veth0    |  |            |  |    veth0    |  |
-#            |  |  db01::2/64 |  |            |  |  db02::2/64 |  |
-#            |  +-------------+  |            |  +-------------+  |
-#            |         .         |            |         .         |
-#            +-------------------+            +-------------------+
-#                      .                                .
-#                      .                                .
-#                      .                                .
-#            +----------------------------------------------------+
-#            |         .                                .         |
-#            |  +-------------+                  +-------------+  |
-#            |  |    veth0    |                  |    veth1    |  |
-#            |  |  db01::1/64 | ................ |  db02::1/64 |  |
-#            |  +-------------+                  +-------------+  |
-#            |                                                    |
-#            |                      Beta netns                    |
-#            |                                                    |
-#            +----------------------------------------------------+
-#
-#
-#
-#        =============================================================
-#        |                Alpha - IOAM configuration                 |
-#        +===========================================================+
-#        | Node ID             | 1                                   |
-#        +-----------------------------------------------------------+
-#        | Node Wide ID        | 11111111                            |
-#        +-----------------------------------------------------------+
-#        | Ingress ID          | 0xffff (default value)              |
-#        +-----------------------------------------------------------+
-#        | Ingress Wide ID     | 0xffffffff (default value)          |
-#        +-----------------------------------------------------------+
-#        | Egress ID           | 101                                 |
-#        +-----------------------------------------------------------+
-#        | Egress Wide ID      | 101101                              |
-#        +-----------------------------------------------------------+
-#        | Namespace Data      | 0xdeadbee0                          |
-#        +-----------------------------------------------------------+
-#        | Namespace Wide Data | 0xcafec0caf00dc0de                  |
-#        +-----------------------------------------------------------+
-#        | Schema ID           | 777                                 |
-#        +-----------------------------------------------------------+
-#        | Schema Data         | something that will be 4n-aligned   |
-#        +-----------------------------------------------------------+
-#
-#
-#        =============================================================
-#        |                 Beta - IOAM configuration                 |
-#        +===========================================================+
-#        | Node ID             | 2                                   |
-#        +-----------------------------------------------------------+
-#        | Node Wide ID        | 22222222                            |
-#        +-----------------------------------------------------------+
-#        | Ingress ID          | 201                                 |
-#        +-----------------------------------------------------------+
-#        | Ingress Wide ID     | 201201                              |
-#        +-----------------------------------------------------------+
-#        | Egress ID           | 202                                 |
-#        +-----------------------------------------------------------+
-#        | Egress Wide ID      | 202202                              |
-#        +-----------------------------------------------------------+
-#        | Namespace Data      | 0xdeadbee1                          |
-#        +-----------------------------------------------------------+
-#        | Namespace Wide Data | 0xcafec0caf11dc0de                  |
-#        +-----------------------------------------------------------+
-#        | Schema ID           | 666                                 |
-#        +-----------------------------------------------------------+
-#        | Schema Data         | Hello there -Obi                    |
-#        +-----------------------------------------------------------+
-#
-#
-#        =============================================================
-#        |                Gamma - IOAM configuration                 |
-#        +===========================================================+
-#        | Node ID             | 3                                   |
-#        +-----------------------------------------------------------+
-#        | Node Wide ID        | 33333333                            |
-#        +-----------------------------------------------------------+
-#        | Ingress ID          | 301                                 |
-#        +-----------------------------------------------------------+
-#        | Ingress Wide ID     | 301301                              |
-#        +-----------------------------------------------------------+
-#        | Egress ID           | 0xffff (default value)              |
-#        +-----------------------------------------------------------+
-#        | Egress Wide ID      | 0xffffffff (default value)          |
-#        +-----------------------------------------------------------+
-#        | Namespace Data      | 0xdeadbee2                          |
-#        +-----------------------------------------------------------+
-#        | Namespace Wide Data | 0xcafec0caf22dc0de                  |
-#        +-----------------------------------------------------------+
-#        | Schema ID           | 0xffffff (= None)                   |
-#        +-----------------------------------------------------------+
-#        | Schema Data         |                                     |
-#        +-----------------------------------------------------------+
+#  +-------------------+                                                            +-------------------+
+#  |                   |                                                            |                   |
+#  |    Alpha netns    |                                                            |    Gamma netns    |
+#  |                   |                                                            |                   |
+#  |  +-------------+  |                                                            |  +-------------+  |
+#  |  |    veth0    |  |                                                            |  |    veth0    |  |
+#  |  |  db01::2/64 |  |                                                            |  |  db04::2/64 |  |
+#  |  +-------------+  |                                                            |  +-------------+  |
+#  |        .          |                                                            |         .         |
+#  +-------------------+                                                            +-------------------+
+#           .                                                                                 .
+#           .                                                                                 .
+#           .                                                                                 .
+#  +------------------------------+   +------------------------------+   +------------------------------+
+#  |        .                     |   |                      .       |   |                    .         |
+#  | +----------+    +----------+ |   | +----------+    +----------+ |   | +----------+    +----------+ |
+#  | |   veth0  |    |   veth1  | |   | |  veth0   |    |  veth1   | |   | |  veth0   |    |  veth1   | |
+#  | |db01::1/64| .. |db02::1/64|.| . |.|db02::2/64| .. |db03::1/64|.| . |.|db03::2/64| .. |db04::1/64| |
+#  | +----------+    +----------+ |   | +----------+    +----------+ |   | +----------+    +----------+ |
+#  |                              |   |                              |   |                              |
+#  |           r1 netns           |   |           r2 netns           |   |           r3 netns           |
+#  +------------------------------+   +------------------------------+   +------------------------------+
 
 source lib.sh
-
-################################################################################
-#                                                                              #
-# WARNING: Be careful if you modify the block below - it MUST be kept          #
-#          synchronized with configurations inside ioam6_parser.c and always   #
-#          reflect the same.                                                   #
-#                                                                              #
-################################################################################
 
 ALPHA=(
 	1					# ID
@@ -135,12 +32,12 @@ ALPHA=(
 	101					# Egress ID
 	101101					# Egress Wide ID
 	0xdeadbee0				# Namespace Data
-	0xcafec0caf00dc0de			# Namespace Wide Data
-	777					# Schema ID (0xffffff = None)
+	0xcafec0caf11dc0de			# Namespace Wide Data
+	555   					# Schema ID (0xffffff = None)
 	"something that will be 4n-aligned"	# Schema Data
 )
 
-BETA=(
+ROUTER1=(
 	2
 	22222222
 	201
@@ -148,9 +45,35 @@ BETA=(
 	202
 	202202
 	0xdeadbee1
-	0xcafec0caf11dc0de
+	0xcafec0caf22dc0de
 	666
 	"Hello there -Obi"
+)
+
+ROUTER2=(
+	4
+	44444444
+	401
+	401401
+	404
+	404404
+	0xdeadbee2
+	0xcafec0caf44dc0de
+	777
+	"Hello there -Obi"
+)
+
+ROUTER3=(
+	5
+	55555555
+	501
+	501501
+	505
+	505505
+	0xdeadbee3
+	0xcafec0caf55dc0de
+	888
+	"Leshy there -Obi"
 )
 
 GAMMA=(
@@ -160,17 +83,11 @@ GAMMA=(
 	301301
 	0xffff
 	0xffffffff
-	0xdeadbee2
-	0xcafec0caf22dc0de
-	555
+	0xdeadbee4
+	0xcafec0caf33dc0de
+	999
 	"World there -Obi"
 )
-
-################################################################################
-#                                                                              #
-#                                   LIBRARY                                    #
-#                                                                              #
-################################################################################
 
 check_kernel_compatibility()
 {
@@ -246,7 +163,7 @@ cleanup()
   ip link del ioam-veth-alpha 2>/dev/null || true
   ip link del ioam-veth-gamma 2>/dev/null || true
 
-  cleanup_ns $ioam_node_alpha $ioam_node_beta $ioam_node_gamma || true
+  cleanup_ns $ioam_node_alpha $ioam_node_r1 $ioam_node_r2 $ioam_node_r3 $ioam_node_gamma || true
 
   if [ $ip6tnl_loaded != 0 ]
   then
@@ -257,72 +174,125 @@ cleanup()
 setup()
 {
   echo "Setup Start"
-  setup_ns ioam_node_alpha ioam_node_beta ioam_node_gamma
+  setup_ns ioam_node_alpha ioam_node_r1 ioam_node_r2 ioam_node_r3 ioam_node_gamma
 
+  # connect namespaces
   ip link add name ioam-veth-alpha netns $ioam_node_alpha type veth \
-         peer name ioam-veth-betaL netns $ioam_node_beta
-  ip link add name ioam-veth-betaR netns $ioam_node_beta type veth \
+         peer name ioam-veth-r1_L netns $ioam_node_r1
+
+  ip link add name ioam-veth-r1_R netns $ioam_node_r1 type veth \
+         peer name ioam-veth-r2_L netns $ioam_node_r2
+
+  ip link add name ioam-veth-r2_R netns $ioam_node_r2 type veth \
+       peer name ioam-veth-r3_L netns $ioam_node_r3
+
+  ip link add name ioam-veth-r3_R netns $ioam_node_r3 type veth \
          peer name ioam-veth-gamma netns $ioam_node_gamma
 
+  # rename interfaces
   ip -netns $ioam_node_alpha link set ioam-veth-alpha name veth0
-  ip -netns $ioam_node_beta link set ioam-veth-betaL name veth0
-  ip -netns $ioam_node_beta link set ioam-veth-betaR name veth1
+  ip -netns $ioam_node_r1 link set ioam-veth-r1_L name veth0
+  ip -netns $ioam_node_r1 link set ioam-veth-r1_R name veth1
+  ip -netns $ioam_node_r2 link set ioam-veth-r2_L name veth0
+  ip -netns $ioam_node_r2 link set ioam-veth-r2_R name veth1
+  ip -netns $ioam_node_r3 link set ioam-veth-r3_L name veth0
+  ip -netns $ioam_node_r3 link set ioam-veth-r3_R name veth1
   ip -netns $ioam_node_gamma link set ioam-veth-gamma name veth0
 
+  # addressing
   ip -netns $ioam_node_alpha addr add db01::2/64 dev veth0
-  ip -netns $ioam_node_alpha link set veth0 up
+  ip -netns $ioam_node_r1 addr add db01::1/64 dev veth0
+  ip -netns $ioam_node_r1 addr add db02::1/64 dev veth1
+  ip -netns $ioam_node_r2 addr add db02::2/64 dev veth0
+  ip -netns $ioam_node_r2 addr add db03::1/64 dev veth1
+  ip -netns $ioam_node_r3 addr add db03::2/64 dev veth0
+  ip -netns $ioam_node_r3 addr add db04::1/64 dev veth1
+  ip -netns $ioam_node_gamma addr add db04::2/64 dev veth0
+
+  # up all links
   ip -netns $ioam_node_alpha link set lo up
-  ip -netns $ioam_node_alpha route add db02::/64 via db01::1 dev veth0
-  ip -netns $ioam_node_alpha route del db01::/64
-  ip -netns $ioam_node_alpha route add db01::/64 dev veth0
+  ip -netns $ioam_node_alpha link set veth0 up
 
-  ip -netns $ioam_node_beta addr add db01::1/64 dev veth0
-  ip -netns $ioam_node_beta addr add db02::1/64 dev veth1
-  ip -netns $ioam_node_beta link set veth0 up
-  ip -netns $ioam_node_beta link set veth1 up
-  ip -netns $ioam_node_beta link set lo up
+  ip -netns $ioam_node_r1 link set lo up
+  ip -netns $ioam_node_r1 link set veth0 up
+  ip -netns $ioam_node_r1 link set veth1 up
 
-  ip -netns $ioam_node_gamma addr add db02::2/64 dev veth0
-  ip -netns $ioam_node_gamma link set veth0 up
+  ip -netns $ioam_node_r2 link set lo up
+  ip -netns $ioam_node_r2 link set veth0 up
+  ip -netns $ioam_node_r2 link set veth1 up
+
+  ip -netns $ioam_node_r3 link set lo up
+  ip -netns $ioam_node_r3 link set veth0 up
+  ip -netns $ioam_node_r3 link set veth1 up
+
   ip -netns $ioam_node_gamma link set lo up
-  ip -netns $ioam_node_gamma route add db01::/64 via db02::1 dev veth0
+  ip -netns $ioam_node_gamma link set veth0 up
 
-  # - IOAM config -
+  # alpha -> gamma via r1
+  ip -netns $ioam_node_alpha route add db04::/64 via db01::1 dev veth0
+  # r1 -> gamma via r2
+  ip -netns $ioam_node_r1 route add db04::/64 via db02::2 dev veth1
+  # r2 -> alpha via r1
+  ip -netns $ioam_node_r2 route add db01::/64 via db02::1 dev veth0
+  # r2 -> gamma via r3
+  ip -netns $ioam_node_r2 route add db04::/64 via db03::2 dev veth1
+  # r3 -> alpha via r2
+  ip -netns $ioam_node_r3 route add db01::/64 via db03::1 dev veth0
+  # gamma -> alpha via r3
+  ip -netns $ioam_node_gamma route add db01::/64 via db04::1 dev veth0
+
+  # IOAM Config - ALPHA
   ip netns exec $ioam_node_alpha sysctl -wq net.ipv6.ioam6_id=${ALPHA[0]}
   ip netns exec $ioam_node_alpha sysctl -wq net.ipv6.ioam6_id_wide=${ALPHA[1]}
+  ip netns exec $ioam_node_alpha sysctl -wq net.ipv6.conf.all.disable_ipv6=0
   ip netns exec $ioam_node_alpha sysctl -wq net.ipv6.conf.veth0.ioam6_id=${ALPHA[4]}
   ip netns exec $ioam_node_alpha sysctl -wq net.ipv6.conf.veth0.ioam6_id_wide=${ALPHA[5]}
   ip -netns $ioam_node_alpha ioam namespace add 123 data ${ALPHA[6]} wide ${ALPHA[7]}
   ip -netns $ioam_node_alpha ioam schema add ${ALPHA[8]} "${ALPHA[9]}"
   ip -netns $ioam_node_alpha ioam namespace set 123 schema ${ALPHA[8]}
 
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.conf.all.forwarding=1
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.ioam6_id=${BETA[0]}
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.ioam6_id_wide=${BETA[1]}
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.conf.veth0.ioam6_enabled=1
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.conf.veth0.ioam6_id=${BETA[2]}
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.conf.veth0.ioam6_id_wide=${BETA[3]}
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.conf.veth1.ioam6_id=${BETA[4]}
-  ip netns exec $ioam_node_beta sysctl -wq net.ipv6.conf.veth1.ioam6_id_wide=${BETA[5]}
-  ip -netns $ioam_node_beta ioam namespace add 123 data ${BETA[6]} wide ${BETA[7]}
-  ip -netns $ioam_node_beta ioam schema add ${BETA[8]} "${BETA[9]}"
-  ip -netns $ioam_node_beta ioam namespace set 123 schema ${BETA[8]}
-  
+  # IOAM Config - R1
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.conf.all.forwarding=1
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.ioam6_id=${ROUTER1[0]}
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.ioam6_id_wide=${ROUTER1[1]}
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.conf.veth0.ioam6_enabled=1
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.conf.veth0.ioam6_id=${ROUTER1[2]}
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.conf.veth0.ioam6_id_wide=${ROUTER1[3]}
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.conf.veth1.ioam6_id=${ROUTER1[4]}
+  ip netns exec $ioam_node_r1 sysctl -wq net.ipv6.conf.veth1.ioam6_id_wide=${ROUTER1[5]}
+  ip -netns $ioam_node_r1 ioam namespace add 123 data ${ROUTER1[6]} wide ${ROUTER1[7]}
+  ip -netns $ioam_node_r1 ioam schema add ${ROUTER1[8]} "${ROUTER1[9]}"
+  ip -netns $ioam_node_r1 ioam namespace set 123 schema ${ROUTER1[8]}
+
+  # IOAM Config - R2
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.conf.all.forwarding=1
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.ioam6_id=${ROUTER2[0]}
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.ioam6_id_wide=${ROUTER2[1]}
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.conf.veth0.ioam6_enabled=1
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.conf.veth0.ioam6_id=${ROUTER2[2]}
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.conf.veth0.ioam6_id_wide=${ROUTER2[3]}
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.conf.veth1.ioam6_id=${ROUTER2[4]}
+  ip netns exec $ioam_node_r2 sysctl -wq net.ipv6.conf.veth1.ioam6_id_wide=${ROUTER2[5]}
+  ip -netns $ioam_node_r2 ioam namespace add 123 data ${ROUTER2[6]} wide ${ROUTER2[7]}
+  ip -netns $ioam_node_r2 ioam schema add ${ROUTER2[8]} "${ROUTER2[9]}"
+  ip -netns $ioam_node_r2 ioam namespace set 123 schema ${ROUTER2[8]}
+
+  # IOAM Config - R3
+  ip netns exec $ioam_node_r3 sysctl -wq net.ipv6.conf.all.forwarding=1
+
+  # IOAM Config - GAMMA
   ip netns exec $ioam_node_gamma sysctl -wq net.ipv6.ioam6_id=${GAMMA[0]}
   ip netns exec $ioam_node_gamma sysctl -wq net.ipv6.ioam6_id_wide=${GAMMA[1]}
-  ip netns exec $ioam_node_gamma sysctl -wq net.ipv6.conf.veth0.ioam6_enabled=1
+  ip netns exec $ioam_node_gamma sysctl -wq net.ipv6.conf.veth0.ioam6_enabled=0
   ip netns exec $ioam_node_gamma sysctl -wq net.ipv6.conf.veth0.ioam6_id=${GAMMA[2]}
   ip netns exec $ioam_node_gamma sysctl -wq net.ipv6.conf.veth0.ioam6_id_wide=${GAMMA[3]}
   ip -netns $ioam_node_gamma ioam namespace add 123 data ${GAMMA[6]} wide ${GAMMA[7]}
-  #added by ariel
   ip -netns $ioam_node_gamma ioam schema add ${GAMMA[8]} "${GAMMA[9]}"
   ip -netns $ioam_node_gamma ioam namespace set 123 schema ${GAMMA[8]}
 
-  
-
   sleep 0.5
 
-  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db02::2 &>/dev/null
+  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null
   if [ $? != 0 ]
   then
     echo "Setup FAILED"
@@ -331,12 +301,11 @@ setup()
   fi
 
 
-  ip -netns $ioam_node_alpha route del db02::/64
+  ip -netns $ioam_node_alpha route del db04::/64
+  ip -netns $ioam_node_alpha route add db04::/64 via db01::1 encap ioam6 mode inline \
+         trace prealloc type 0xBC8000 ns 123 size 128 dev veth0
 
-  ip -netns $ioam_node_alpha route add db02::/64 via db01::1 encap ioam6 mode inline \
-         trace prealloc type 0xBC8000 ns 123 size 64 dev veth0
-
-    echo "Setup SUCCESS"
+  echo "Setup SUCCESS"
 }
 
 check_kernel_compatibility
@@ -347,15 +316,13 @@ ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
 PID_ALPHA=$!
 
 sleep 0.1
-
 ip netns exec $ioam_node_gamma tcpdump -i veth0 'ip6' -w gamma.pcap &
 PID_GAMMA=$!
 
 sleep 0.5
-
-ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db02::2
+# ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db04::2
+ip netns exec $ioam_node_alpha tracepath -6 -n -m 10 -l 516 -p 33434 db04::2
 
 sleep 1
-
 kill "$PID_ALPHA" "$PID_GAMMA"
 cleanup &>/dev/null

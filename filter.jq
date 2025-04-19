@@ -8,6 +8,7 @@
         if ._source.layers.icmpv6["icmpv6.type"] == "128" then "ping request"
         elif ._source.layers.icmpv6["icmpv6.type"] == "129" then "ping reply"
         else "other"
+        
         end
       ),
       sequence: (
