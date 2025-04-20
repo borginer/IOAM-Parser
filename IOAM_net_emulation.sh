@@ -320,8 +320,9 @@ ip netns exec $ioam_node_gamma tcpdump -i veth0 'ip6' -w gamma.pcap &
 PID_GAMMA=$!
 
 sleep 0.5
+
 # ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db04::2
-ip netns exec $ioam_node_alpha tracepath -6 -n -m 10 -l 516 -p 33434 db04::2
+ip netns exec $ioam_node_alpha strace tracepath -6 -n -m 10 -l 1024 -p 33434 db04::2 2> strace_err.txt
 
 sleep 1
 kill "$PID_ALPHA" "$PID_GAMMA"

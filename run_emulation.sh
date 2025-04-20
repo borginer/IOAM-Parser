@@ -8,7 +8,6 @@ rm filtered_ioam.json
 
 sleep 1
 
-tshark -r gamma.pcap -Y "icmpv6.type == 128 || icmpv6.type == 129" \
-       -T json > packets.json
+tshark -r gamma.pcap -T json > packets.json
 
 jq -f filter.jq packets.json > filtered_ioam.json
