@@ -2,7 +2,7 @@
 #  +-------------------+                                                            +-------------------+
 #  |                   |                                                            |                   |
 #  |    Alpha netns    |                                                            |    Gamma netns    |
-#  |                   |                                                            |                   |
+#  |     deadbee0      |                                                            |      deadbee4     |
 #  |  +-------------+  |                                                            |  +-------------+  |
 #  |  |    veth0    |  |                                                            |  |    veth0    |  |
 #  |  |  db01::2/64 |  |                                                            |  |  db04::2/64 |  |
@@ -13,7 +13,7 @@
 #           .                                                                                 .
 #           .                                                                                 .
 #  +------------------------------+   +------------------------------+   +------------------------------+
-#  |        .                     |   |                      .       |   |                    .         |
+#  |        .  deadbee1           |   |           deadbee2   .       |   |           deadbee3 .         |
 #  | +----------+    +----------+ |   | +----------+    +----------+ |   | +----------+    +----------+ |
 #  | |   veth0  |    |   veth1  | |   | |  veth0   |    |  veth1   | |   | |  veth0   |    |  veth1   | |
 #  | |db01::1/64| .. |db02::1/64|.| . |.|db02::2/64| .. |db03::1/64|.| . |.|db03::2/64| .. |db04::1/64| |
@@ -303,7 +303,7 @@ setup()
 
   ip -netns $ioam_node_alpha route del db04::/64
   ip -netns $ioam_node_alpha route add db04::/64 via db01::1 encap ioam6 mode inline \
-         trace prealloc type 0xBC8000 ns 123 size 128 dev veth0
+         trace prealloc type 0xBC8000 ns 123 size 156 dev veth0
 
   echo "Setup SUCCESS"
 }
@@ -312,8 +312,8 @@ check_kernel_compatibility
 setup
 
 echo ""
-# ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
-ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py &
+ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
+# ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py &
 PID_ALPHA=$!
 
 sleep 0.1
@@ -323,7 +323,8 @@ PID_GAMMA=$!
 sleep 0.5
 
 # ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db04::2
-ip netns exec $ioam_node_alpha ./iputils/builddir/tracepath -6 -n -m 10 -l 256 -p 33434 db04::2
+# ip netns exec $ioam_node_alpha ./iputils/builddir/tracepath -6 -n -m 10 -l 256 -p 33434 db04::2
+ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py -i veth0 db04::2
 
 sleep 1
 kill "$PID_ALPHA" "$PID_GAMMA"

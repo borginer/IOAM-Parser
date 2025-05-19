@@ -1,7 +1,8 @@
-from scapy.all import (
-    sniff, wrpcap, rdpcap, Raw
-)
+from scapy.all import AsyncSniffer
 from scapy.layers.inet6 import IPv6, ICMPv6TimeExceeded, IPv6ExtHdrHopByHop, ICMPv6DestUnreach
+
+import subprocess, sys, argparse, threading
+
 
 pcap_file = "alpha.pcap"
 tab4 = "    "
@@ -35,7 +36,7 @@ def print_node_fields(node_fields, node_data: bytes):
 
     if offset < len(node_data):
         remaining = node_data[offset:]
-        print(f"  [!] Warning: {len(remaining)} extra bytes at end of node data")
+        print(f"[!] Warning: {len(remaining)} extra bytes at end of node data")
 
 
 def decode_trace_type(trace_type):
@@ -45,16 +46,6 @@ def decode_trace_type(trace_type):
     for bit_index, name, size in IOAM_TRACE_FIELDS:
         if trace_type_int & (1 << (23 - bit_index)):  # MSB is bit 0
             node_fields.append((name, size))
-
-    # Bits 12–21: Reserved
-    for bit_index in range(12, 22):
-        if trace_type_int & (1 << (23 - bit_index)):
-            name = f"reserved_bit_{bit_index}"
-            node_fields.append((name, 4))
-
-    # Bit 22: Opaque snapshot (not parsed)
-    if trace_type_int & (1 << (23 - 22)):
-        print("[!] Bit 22 (opaque snapshot) is set — not parsed.")
 
     return node_fields
 
@@ -96,11 +87,12 @@ def parse_ioam_option(opt):
     
 
 def parse_packet(pkt):
-    raw_data = None
     if ICMPv6TimeExceeded in pkt:
         icmp_payload = bytes(pkt[ICMPv6TimeExceeded].payload)    
+        icmp_type = "ICMPv6TimeExceeded"
     elif ICMPv6DestUnreach in pkt:
         icmp_payload = bytes(pkt[ICMPv6DestUnreach].payload)
+        icmp_type = "ICMPv6DestUnreach"
     else:
         return
 
@@ -110,16 +102,53 @@ def parse_packet(pkt):
             hopopts = inner_ipv6[IPv6ExtHdrHopByHop]
             for opt in hopopts.options:
                 if opt.otype == 0x31:  # IOAM Trace Option
-                    print(f"[+] IOAM Option found, length = {opt.optlen}") 
+                    print(f"[+] IOAM Option found, icmp type = {icmp_type}, length = {opt.optlen}") 
                     parse_ioam_option(opt)
     except Exception as e:
         print(f"[-] Failed to extract IOAM: {e}")
 
+def run_tracepath(destination):
+    print(f"[.] Running Tracepath...")
+    try:
+        result = subprocess.run(
+            ["tracepath", "-6", "-n", "-m 20", "-l 1000", "-p 33434", destination],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e.stderr}")
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="IOAM Tracepath Sniffer & Parser")
+    parser.add_argument("-i", "--interface", required=True, help="Interface to sniff on")
+    parser.add_argument("ip", help="IPv6 address to tracepath")
+    return parser.parse_args()
 if __name__ == "__main__":
-    print(f"[ioam_parser]: Reading {pcap_file}...")
-    packets = rdpcap(pcap_file)
+    args = parse_args()
+    
+    ready = threading.Event()
+    sniffer = AsyncSniffer(iface=args.interface, timeout=30, 
+                           store=True, started_callback=lambda: ready.set())
+    sniffer.start()
+    ready.wait()
 
-    print(f"[ioam_parser]: Parsing {len(packets)} packets for IOAM data...")
-    for i, pkt in enumerate(packets):
-        ioam_data = parse_packet(pkt)
+    run_tracepath(args.ip)
+
+    sniffer.stop()
+    sniffer.join()
+    packets = sniffer.results
+
+    print(f"[ioam parser]: Parsing {len(packets)} packets for IOAM data...")
+
+    with open("ioam_data.txt", "w") as f:
+        original_stdout = sys.stdout
+        sys.stdout = f
+        for i, pkt in enumerate(packets):
+            ioam_data = parse_packet(pkt)
+            print("")
+        sys.stdout = original_stdout
+
+    print(f"[ioam parser]: Finished")
+    
