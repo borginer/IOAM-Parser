@@ -1,0 +1,5 @@
+tracepath*
+*.jq
+*.txt
+*.pcap
+iputils

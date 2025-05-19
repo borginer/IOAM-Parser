@@ -1,0 +1,125 @@
+from scapy.all import (
+    sniff, wrpcap, rdpcap, Raw
+)
+from scapy.layers.inet6 import IPv6, ICMPv6TimeExceeded, IPv6ExtHdrHopByHop, ICMPv6DestUnreach
+
+pcap_file = "alpha.pcap"
+tab4 = "    "
+
+IOAM_TRACE_FIELDS = [
+    (0,  "hop_lim_node_id_short",       4),
+    (1,  "ingress_egress_if_id_short",  4),
+    (2,  "timestamp_secs",              4),
+    (3,  "timestamp_frac",              4),
+    (4,  "transit_delay",               4),
+    (5,  "namespace_specific_short",    4),
+    (6,  "queue_depth",                 4),
+    (7,  "checksum_complement",         4),
+    (8,  "hop_lim_node_id_wide",        8),
+    (9,  "ingress_egress_if_id_wide",   8),
+    (10, "namespace_specific_wide",     8),
+    (11, "buffer_occupancy",            4),
+    # bits 12–21: reserved, 4 bytes each if set
+    # bit 22: opaque snapshot, variable-length — skip
+]
+
+def print_node_fields(node_fields, node_data: bytes):
+    offset = 0
+    for name, size in node_fields:
+        if offset + size > len(node_data):
+            print(f"[!] Not enough data left to parse field {name}. Skipping.")
+            break
+        value = node_data[offset:offset+size]
+        print(f"{3 * tab4}{name}: " + ''.join(f'{b:02x}' for b in value))
+        offset += size
+
+    if offset < len(node_data):
+        remaining = node_data[offset:]
+        print(f"  [!] Warning: {len(remaining)} extra bytes at end of node data")
+
+
+def decode_trace_type(trace_type):
+    node_fields = []
+    trace_type_int = int.from_bytes(trace_type)
+
+    for bit_index, name, size in IOAM_TRACE_FIELDS:
+        if trace_type_int & (1 << (23 - bit_index)):  # MSB is bit 0
+            node_fields.append((name, size))
+
+    # Bits 12–21: Reserved
+    for bit_index in range(12, 22):
+        if trace_type_int & (1 << (23 - bit_index)):
+            name = f"reserved_bit_{bit_index}"
+            node_fields.append((name, 4))
+
+    # Bit 22: Opaque snapshot (not parsed)
+    if trace_type_int & (1 << (23 - 22)):
+        print("[!] Bit 22 (opaque snapshot) is set — not parsed.")
+
+    return node_fields
+
+def print_bytes_hexa(bytes):
+    for i in range(0, len(bytes), 16):
+        chunk = bytes[i:i+16]
+        hex_line = chunk.hex()
+        spaced_hex = ' '.join(hex_line[j:j+2] for j in range(0, len(hex_line), 2))
+        print(f"{i:04x}: {spaced_hex}")
+
+
+def parse_ioam_option(opt):
+    # print_bytes_hexa(opt.optdata)
+    data = opt.optdata
+    reserved = data[0]
+    option_type = data[1] # should be 0 for pre allocated trace 
+    namespace_id = data[2:4]
+    # node length is first 5 bits of 5th byte
+    node_length = 4 * ((int.from_bytes(data[4:5]) & 0b11111000) >> 3)
+    # remaining length is 7 bottom bits of 6th byte
+    remaining_length = 4 * ((int.from_bytes(data[5:6]) & 0b01111111))
+    trace_type = data[6:9]
+    trace_data = data[10:]
+    node_array = trace_data[remaining_length:] # skip free space
+
+    node_fields = decode_trace_type(trace_type)
+
+    print(f"{tab4}namespace id: {int.from_bytes(namespace_id)}")
+    print(f"{tab4}node length: {node_length}")
+    print(f"{tab4}trace type: 0x" + ''.join(f'{b:02x}' for b in trace_type))
+    # print(f"remaining_length: {remaining_length}")
+    # for field in node_fields:
+    #     print(f"{field[0]} - length: {field[1]}")
+    print(f"{tab4}Node Array:")
+    for i in range(0, int(len(node_array) / node_length)):
+        print(f"{2 * tab4}Node {i + 1}:")
+        node = node_array[i * node_length:i * node_length + node_length]
+        print_node_fields(node_fields, node)
+    
+
+def parse_packet(pkt):
+    raw_data = None
+    if ICMPv6TimeExceeded in pkt:
+        icmp_payload = bytes(pkt[ICMPv6TimeExceeded].payload)    
+    elif ICMPv6DestUnreach in pkt:
+        icmp_payload = bytes(pkt[ICMPv6DestUnreach].payload)
+    else:
+        return
+
+    try:
+        inner_ipv6 = IPv6(icmp_payload)
+        if IPv6ExtHdrHopByHop in inner_ipv6:
+            hopopts = inner_ipv6[IPv6ExtHdrHopByHop]
+            for opt in hopopts.options:
+                if opt.otype == 0x31:  # IOAM Trace Option
+                    print(f"[+] IOAM Option found, length = {opt.optlen}") 
+                    parse_ioam_option(opt)
+    except Exception as e:
+        print(f"[-] Failed to extract IOAM: {e}")
+
+
+if __name__ == "__main__":
+    print(f"[ioam_parser]: Reading {pcap_file}...")
+    packets = rdpcap(pcap_file)
+
+    print(f"[ioam_parser]: Parsing {len(packets)} packets for IOAM data...")
+    for i, pkt in enumerate(packets):
+        ioam_data = parse_packet(pkt)

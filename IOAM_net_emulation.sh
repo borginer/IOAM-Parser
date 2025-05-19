@@ -292,7 +292,7 @@ setup()
 
   sleep 0.5
 
-  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null
+  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null 
   if [ $? != 0 ]
   then
     echo "Setup FAILED"
@@ -312,7 +312,8 @@ check_kernel_compatibility
 setup
 
 echo ""
-ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
+# ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
+ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py &
 PID_ALPHA=$!
 
 sleep 0.1
@@ -322,7 +323,7 @@ PID_GAMMA=$!
 sleep 0.5
 
 # ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db04::2
-ip netns exec $ioam_node_alpha strace tracepath -6 -n -m 10 -l 1024 -p 33434 db04::2 2> strace_err.txt
+ip netns exec $ioam_node_alpha ./iputils/builddir/tracepath -6 -n -m 10 -l 256 -p 33434 db04::2
 
 sleep 1
 kill "$PID_ALPHA" "$PID_GAMMA"

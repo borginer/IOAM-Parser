@@ -8,6 +8,8 @@ rm filtered_ioam.json
 
 sleep 1
 
-tshark -r gamma.pcap -T json > packets.json
 
-jq -f filter.jq packets.json > filtered_ioam.json
+
+# tshark -r gamma.pcap -T json > packets.json
+
+# jq -f filter.jq packets.json > filtered_ioam.json
