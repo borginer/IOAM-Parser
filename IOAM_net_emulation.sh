@@ -312,20 +312,20 @@ check_kernel_compatibility
 setup
 
 echo ""
-ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
+# ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
 # ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py &
-PID_ALPHA=$!
+# PID_ALPHA=$!
 
-sleep 0.1
-ip netns exec $ioam_node_gamma tcpdump -i veth0 'ip6' -w gamma.pcap &
-PID_GAMMA=$!
+# sleep 0.1
+# ip netns exec $ioam_node_gamma tcpdump -i veth0 'ip6' -w gamma.pcap &
+# PID_GAMMA=$!
 
-sleep 0.5
+sleep 0.2
 
 # ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db04::2
 # ip netns exec $ioam_node_alpha ./iputils/builddir/tracepath -6 -n -m 10 -l 256 -p 33434 db04::2
 ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py -i veth0 db04::2
 
-sleep 1
-kill "$PID_ALPHA" "$PID_GAMMA"
+sleep 0.3
+# kill "$PID_ALPHA" "$PID_GAMMA"
 cleanup &>/dev/null
