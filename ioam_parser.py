@@ -30,11 +30,42 @@ class IOAMHeader:
     node_array: bytes
     trace_fields = []
 
+    def __init__(self, ns_id: int, node_len: int, trace_type: bytes, node_array: bytes, trace_fields):
+        self.namespace_id = ns_id
+        self.node_length = node_len
+        self.trace_type = trace_type
+        self.node_array = node_array
+        self.trace_fields = trace_fields
+
+    def __repr__(self) -> str:
+        s = f"{tab4}Namespace ID: {self.namespace_id}\n"
+        s += f"{tab4}Node Length: {self.node_length}\n"
+        s += f"{tab4}Trace Type: 0x" + (''.join(f'{b:02x}' for b in self.trace_type) + "\n")
+        s += f"{tab4}Node Array:\n"
+
+        for i in range(0, int(len(self.node_array) / self.node_length)):
+            s += f"{2 * tab4}Node {i + 1}:\n"
+            node_start = i * self.node_length
+            node = self.node_array[node_start:node_start + self.node_length]
+            s += node_str(self.trace_fields, node)
+        s += "\n"
+        return s
+
 class IOAMPacketInfo:
     icmp_type = ""
     src_ip = ""
     ioam_header: IOAMHeader | None
     
+    def __init__(self, icmp_type: str, src_ip: str, ioam_header: IOAMHeader):
+        self.icmp_type = icmp_type
+        self.src_ip = src_ip
+        self.ioam_header = ioam_header
+    
+    def __repr__(self) -> str:
+        s = self.icmp_type + " from " + self.src_ip + "\n"
+        s += str(self.ioam_header)
+        return s
+
 
 def print_bytes_hexa(bytes):
     for i in range(0, len(bytes), 16):
@@ -44,35 +75,22 @@ def print_bytes_hexa(bytes):
         print(f"{i:04x}: {spaced_hex}")
 
 
-def print_node_fields(node_fields, node_data: bytes):
+def node_str(node_fields, node_data: bytes) -> str:
+    s = ""
     offset = 0
     for name, size in node_fields:
         if offset + size > len(node_data):
             print(f"[!] Not enough data left to parse field {name}. Skipping.")
             break
         value = node_data[offset:offset+size]
-        print(f"{3 * tab4}{name}: " + ''.join(f'{b:02x}' for b in value))
+        s += f"{3 * tab4}{name}: " + (''.join(f'{b:02x}' for b in value) + "\n")
         offset += size
 
     if offset < len(node_data):
         remaining = node_data[offset:]
         print(f"[!] Warning: {len(remaining)} extra bytes at end of node data")
+    return s
 
-
-def print_ioam_data(ioamh: IOAMHeader):
-    print(f"{tab4}Namespace ID: {ioamh.namespace_id}")
-    print(f"{tab4}Node Length: {ioamh.node_length}")
-    print(f"{tab4}Trace Type: 0x" + ''.join(f'{b:02x}' for b in ioamh.trace_type))
-    print(f"{tab4}Node Array:")
-
-    trace_fields = ioamh.trace_fields
-    for i in range(0, int(len(ioamh.node_array) / ioamh.node_length)):
-        print(f"{2 * tab4}Node {i + 1}:")
-        node_start = i * ioamh.node_length
-        node = ioamh.node_array[node_start:node_start + ioamh.node_length]
-        print_node_fields(trace_fields, node)
-
-    print("")
 
 def decode_trace_type(trace_type):
     trace_fields = []
@@ -86,26 +104,27 @@ def decode_trace_type(trace_type):
 
 
 def parse_ioam_option(opt):
-    # print_bytes_hexa(opt.optdata)
     data = opt.optdata
-    header = IOAMHeader()
-    # should be 0 for pre allocated trace
-    option_type = int.from_bytes([data[1]])
+
+    option_type = data[1]
     if option_type != 0:
         print("[!] Non Pre-Allocated Trace-Option detected")
         return
 
-    header.namespace_id = int.from_bytes(data[2:4])
-    # node length is first 5 bits of 5th byte
-    header.node_length = 4 * ((int.from_bytes(data[4:5]) & 0b11111000) >> 3)
-    # remaining length is 7 bottom bits of 6th byte
-    remaining_length = 4 * ((int.from_bytes(data[5:6]) & 0b01111111))
-    header.trace_type = data[6:9]
-    header.trace_fields = decode_trace_type(header.trace_type)
-    trace_data = data[10:] 
-    # skip free space
-    header.node_array = trace_data[remaining_length:] 
+    namespace_id = int.from_bytes(data[2:4])
+    # node length is first 5 bits of 5th byte, scale of 4
+    node_length = 4 * ((data[4] & 0b11111000) >> 3)
+    # remaining length is 7 bottom bits of 6th byte, scale of 4
+    remaining_length = 4 * (data[5] & 0b01111111)
 
+    trace_type = data[6:9]
+    trace_fields = decode_trace_type(trace_type)
+
+    # skip free space
+    trace_data = data[10:]
+    node_array = trace_data[remaining_length:] 
+
+    header = IOAMHeader(namespace_id, node_length, trace_type, node_array, trace_fields)
     return header
     
 
@@ -119,10 +138,6 @@ def parse_packet(pkt):
     else:
         return
     
-    packet_info = IOAMPacketInfo()
-    packet_info.src_ip = pkt[IPv6].src
-    packet_info.icmp_type = icmp_type
-
     try:
         inner_ipv6 = IPv6(icmp_payload)
         if IPv6ExtHdrHopByHop in inner_ipv6:
@@ -130,9 +145,9 @@ def parse_packet(pkt):
             for opt in hopopts.options:
                 if opt.otype == 0x31:  # IOAM Trace Option
                     print(f"[+] IOAM Option found, icmp type = {icmp_type}, length = {opt.optlen}") 
-                    packet_info.ioam_header = parse_ioam_option(opt)
-                    if packet_info.ioam_header:
-                        return packet_info
+                    ioam_header = parse_ioam_option(opt)
+                    if ioam_header:
+                        return IOAMPacketInfo(icmp_type, pkt[IPv6].src, ioam_header)
     except Exception as e:
         print(f"[-] Failed to extract IOAM: {e}")
 
@@ -159,7 +174,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def capture_packets():
+def capture_packets(args):
     ready = threading.Event()
     sniffer = AsyncSniffer(iface=args.interface, timeout=30, 
                            store=True, started_callback=lambda: ready.set())
@@ -176,7 +191,7 @@ def capture_packets():
     return packets
 
 
-def get_packets():
+def get_packets(args):
     input_is_ip = False
     try:
         ipaddress.ip_address(args.input)
@@ -185,33 +200,42 @@ def get_packets():
         pass
     
     if input_is_ip:
-        packets = capture_packets()
+        packets = capture_packets(args)
     else:
         packets = rdpcap(args.input)
     
     return packets
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    packets = get_packets()
-
+def parse_packets(packets) -> list[IOAMPacketInfo]:
     print(f"{parser_prefix} Parsing {len(packets)} packets for IOAM data...")
-    ioam_packets_array = []
+    ioam_info_array = []
     for i, pkt in enumerate(packets):
-        ioam_data = parse_packet(pkt)
-        if ioam_data:
-            ioam_packets_array.append(ioam_data)
-    print(f"{parser_prefix} found IOAM data in {len(ioam_packets_array)} packets")
-        
+        ioam_info = parse_packet(pkt)
+        if ioam_info:
+            ioam_info_array.append(ioam_info)
+    print(f"{parser_prefix} found IOAM data in {len(ioam_info_array)} packets")
+    return ioam_info_array
+
+
+def print_ioam_info(info_array):
     with open("ioam_data.txt", "w") as f:
         original_stdout = sys.stdout
         sys.stdout = f
 
-        for pkt in ioam_packets_array:
-            print(pkt.icmp_type, "from", pkt.src_ip)
-            print_ioam_data(pkt.ioam_header)
+        for pkt in info_array:
+            print(pkt)
         sys.stdout = original_stdout
 
     print(f"{parser_prefix} Finished")
-    
+
+
+def main():
+    args = parse_args()
+    packets = get_packets(args)
+    ioam_info_array = parse_packets(packets)
+    print_ioam_info(ioam_info_array)
+
+
+if __name__ == "__main__":
+    main()
