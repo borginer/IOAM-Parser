@@ -30,6 +30,11 @@ class IOAMHeader:
     node_array: bytes
     trace_fields = []
 
+class IOAMPacketInfo:
+    icmp_type = ""
+    src_ip = ""
+    ioam_header: IOAMHeader | None
+    
 
 def print_bytes_hexa(bytes):
     for i in range(0, len(bytes), 16):
@@ -67,6 +72,7 @@ def print_ioam_data(ioamh: IOAMHeader):
         node = ioamh.node_array[node_start:node_start + ioamh.node_length]
         print_node_fields(trace_fields, node)
 
+    print("")
 
 def decode_trace_type(trace_type):
     trace_fields = []
@@ -112,6 +118,10 @@ def parse_packet(pkt):
         icmp_type = "ICMPv6DestUnreach"
     else:
         return
+    
+    packet_info = IOAMPacketInfo()
+    packet_info.src_ip = pkt[IPv6].src
+    packet_info.icmp_type = icmp_type
 
     try:
         inner_ipv6 = IPv6(icmp_payload)
@@ -120,9 +130,9 @@ def parse_packet(pkt):
             for opt in hopopts.options:
                 if opt.otype == 0x31:  # IOAM Trace Option
                     print(f"[+] IOAM Option found, icmp type = {icmp_type}, length = {opt.optlen}") 
-                    ioam_data = parse_ioam_option(opt)
-                    if ioam_data:
-                        return ioam_data
+                    packet_info.ioam_header = parse_ioam_option(opt)
+                    if packet_info.ioam_header:
+                        return packet_info
     except Exception as e:
         print(f"[-] Failed to extract IOAM: {e}")
 
@@ -136,7 +146,7 @@ def run_tracepath(destination):
             text=True,
             check=True
         )
-        print(result.stdout)
+        print(tab4 + result.stdout.replace("\n", "\n" + tab4))
     except subprocess.CalledProcessError as e:
         print(f"{parser_prefix} Tracepath Error: {e.stderr}")
 
@@ -187,19 +197,20 @@ if __name__ == "__main__":
     packets = get_packets()
 
     print(f"{parser_prefix} Parsing {len(packets)} packets for IOAM data...")
-    ioam_data_array = []
+    ioam_packets_array = []
     for i, pkt in enumerate(packets):
         ioam_data = parse_packet(pkt)
         if ioam_data:
-            ioam_data_array.append(ioam_data)
-    print(f"{parser_prefix} found IOAM data in {len(ioam_data_array)} packets")
+            ioam_packets_array.append(ioam_data)
+    print(f"{parser_prefix} found IOAM data in {len(ioam_packets_array)} packets")
         
     with open("ioam_data.txt", "w") as f:
         original_stdout = sys.stdout
         sys.stdout = f
-        for ioam_data in ioam_data_array:
-            print_ioam_data(ioam_data)
-            print("")
+
+        for pkt in ioam_packets_array:
+            print(pkt.icmp_type, "from", pkt.src_ip)
+            print_ioam_data(pkt.ioam_header)
         sys.stdout = original_stdout
 
     print(f"{parser_prefix} Finished")

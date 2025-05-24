@@ -1,8 +1,9 @@
 #!/bin/bash
 
-rm gamma.pcap
-rm packets.json
-rm filtered_ioam.json
+for file in "gamma.pcap" "alpha.pcap"; do
+    [ -f "$file" ] && rm $file
+done
+
 
 ./IOAM_net_emulation.sh
 

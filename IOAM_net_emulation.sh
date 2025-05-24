@@ -24,6 +24,8 @@
 
 source lib.sh
 
+leader="[netns emulation] "
+
 ALPHA=(
 	1					# ID
 	11111111				# Wide ID
@@ -91,6 +93,8 @@ GAMMA=(
 
 check_kernel_compatibility()
 {
+  echo -n $leader"IOAM Compatibility Check: "
+
   setup_ns ioam_tmp_node
   ip link add name veth0 netns $ioam_tmp_node type veth \
          peer name veth1 netns $ioam_tmp_node
@@ -155,7 +159,7 @@ check_kernel_compatibility()
     fi
   fi
 
-  echo "IOAM Compatibility Check SUCCESS"
+  echo "SUCCESS" 
 }
 
 cleanup()
@@ -173,7 +177,7 @@ cleanup()
 
 setup()
 {
-  echo "Setup Start"
+  echo -n $leader"Setup: "
   setup_ns ioam_node_alpha ioam_node_r1 ioam_node_r2 ioam_node_r3 ioam_node_gamma
 
   # connect namespaces
@@ -290,42 +294,39 @@ setup()
   ip -netns $ioam_node_gamma ioam schema add ${GAMMA[8]} "${GAMMA[9]}"
   ip -netns $ioam_node_gamma ioam namespace set 123 schema ${GAMMA[8]}
 
-  sleep 0.5
-
-  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null 
-  if [ $? != 0 ]
-  then
-    echo "Setup FAILED"
-    cleanup &>/dev/null
-    exit 0
-  fi
-
-
   ip -netns $ioam_node_alpha route del db04::/64
   ip -netns $ioam_node_alpha route add db04::/64 via db01::1 encap ioam6 mode inline \
          trace prealloc type 0xBC8000 ns 123 size 156 dev veth0
 
-  echo "Setup SUCCESS"
+  sleep 0.1
+
+  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null  
+  if [ $? != 0 ]
+  then
+    echo "FAILED"
+    cleanup &>/dev/null
+    exit 0
+  fi
+
+  echo "SUCCESS"
 }
 
 check_kernel_compatibility
 setup
 
-echo ""
-# ip netns exec $ioam_node_alpha tcpdump -i veth0 'ip6' -w alpha.pcap &
-# ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py &
-# PID_ALPHA=$!
+sleep 0.1
 
-# sleep 0.1
-# ip netns exec $ioam_node_gamma tcpdump -i veth0 'ip6' -w gamma.pcap &
-# PID_GAMMA=$!
+ip netns exec $ioam_node_alpha sudo timeout 7s tcpdump -i any -w alpha.pcap &
+PID_ALPHA=$!
 
-sleep 0.2
+sleep 0.1
+ip netns exec $ioam_node_gamma sudo timeout 7s tcpdump -i any -w gamma.pcap &
+PID_GAMMA=$!
+
+sleep 0.1
 
 # ip netns exec $ioam_node_alpha ping -6 -c 5 -W 1 db04::2
-# ip netns exec $ioam_node_alpha ./iputils/builddir/tracepath -6 -n -m 10 -l 256 -p 33434 db04::2
+# ip netns exec $ioam_node_alpha tracepath -6 -n -m 10 -l 256 -p 33434 db04::2
 ip netns exec $ioam_node_alpha sudo python3 ./ioam_parser.py -i veth0 db04::2
 
-sleep 0.3
-# kill "$PID_ALPHA" "$PID_GAMMA"
 cleanup &>/dev/null
