@@ -8,11 +8,11 @@ from scapy.layers.inet6 import (
 from datetime import datetime
 from enum import Enum
 
-import subprocess, sys, argparse, threading, ipaddress, copy
+import subprocess, argparse, threading, ipaddress, copy, logging, sys
 
 tab4 = "    "
 parser_prefix = "[IOAM parser]"
-
+logger = logging.getLogger("IOAM Parser")
 
 class TraceFieldEnum(Enum):
     HOP_LIM_NODE_ID_SHORT = (0, "Hop_Lim and Node ID (short)", 4)
@@ -65,20 +65,21 @@ class IOAMHeader:
         self.trace_fields = trace_fields
 
     def __repr__(self) -> str:
-        s = f"{tab4}Namespace ID: {self.namespace_id}\n"
-        s += f"{tab4}Node Length: {self.node_length}\n"
-        s += f"{tab4}Trace Type: 0x" + (
+        s = f"Namespace ID: {self.namespace_id}\n"
+        s += f"Node Length: {self.node_length}\n"
+        s += f"Trace Type: 0x" + (
             "".join(f"{b:02x}" for b in self.trace_type) + "\n"
         )
-        s += f"{tab4}Node Array:\n"
-
+        s += f"Node Array:\n"
+        s = add_indent(s, 1)
+        
         node_num = int(len(self.node_array) / self.node_length)
         # print nodes in reverse order
         for i in range(node_num - 1, -1, -1):
-            s += f"{2 * tab4}Node {node_num - i}:\n"
+            s += add_indent(f"Node {node_num - i}:\n", 2)
             node_start = i * self.node_length
             node = self.node_array[node_start : node_start + self.node_length]
-            s += node_str(self.trace_fields, node)
+            s += add_indent(node_str(self.trace_fields, node), 3)
         s += "\n"
         return s
 
@@ -95,12 +96,16 @@ class IOAMPacketInfo:
         return s
 
 
+def add_indent(s: str, num: int) -> str:
+    return num*tab4 + s.replace("\n", "\n" + num*tab4).rstrip(" ")
+
+
 def print_bytes_hexa(bytes):
     for i in range(0, len(bytes), 16):
         chunk = bytes[i : i + 16]
         hex_line = chunk.hex()
         spaced_hex = " ".join(hex_line[j : j + 2] for j in range(0, len(hex_line), 2))
-        print(f"{i:04x}: {spaced_hex}")
+        logger.error(f"{i:04x}: {spaced_hex}")
 
 
 def node_str(trace_fields: list[TraceFieldEnum], node_data: bytes) -> str:
@@ -108,15 +113,15 @@ def node_str(trace_fields: list[TraceFieldEnum], node_data: bytes) -> str:
     offset = 0
     for tf in trace_fields:
         if offset + tf.size > len(node_data):
-            print(f"[!] Not enough data left to parse field {tf.name}. Skipping.")
+            logger.error(f"Not enough data left to parse field {tf.name}. Skipping.")
             break
         value = node_data[offset : offset + tf.size]
-        s += f"{3 * tab4}" + tf.field_str(value)
+        s += tf.field_str(value)
         offset += tf.size
 
     if offset < len(node_data):
         remaining = node_data[offset:]
-        print(f"[!] Warning: {len(remaining)} extra bytes at end of node data")
+        logger.error(f"Warning: {len(remaining)} extra bytes at end of node data")
     return s
 
 
@@ -136,7 +141,7 @@ def parse_ioam_option(opt) -> IOAMHeader | None:
 
     option_type = data[1]
     if option_type != 0:
-        print("[!] Non Pre-Allocated Trace-Option detected")
+        logger.error("Non Pre-Allocated Trace-Option detected")
         return
 
     namespace_id = int.from_bytes(data[2:4])
@@ -172,18 +177,15 @@ def parse_packet(pkt) -> IOAMPacketInfo | None:
             hopopts = inner_ipv6[IPv6ExtHdrHopByHop]
             for opt in hopopts.options:
                 if opt.otype == 0x31:  # IOAM Trace Option
-                    print(
-                        f"[+] IOAM Option found, icmp type = {icmp_type}, length = {opt.optlen}"
-                    )
                     ioam_header = parse_ioam_option(opt)
                     if ioam_header:
                         return IOAMPacketInfo(icmp_type, pkt[IPv6].src, ioam_header)
     except Exception as e:
-        print(f"[-] Failed to extract IOAM: {e}")
+        logger.error(f"Failed to extract IOAM: {e}")
 
 
 def run_tracepath(destination):
-    print(f"{parser_prefix} Running Tracepath:")
+    logger.info("Running Tracepath...")
     try:
         result = subprocess.run(
             ["tracepath", "-6", "-n", "-m 20", "-l 256", "-p 33434", destination],
@@ -191,9 +193,9 @@ def run_tracepath(destination):
             text=True,
             check=True,
         )
-        print(tab4 + result.stdout.replace("\n", "\n" + tab4))
+        logger.info("Tracepath Output:\n" + add_indent(result.stdout, 1))
     except subprocess.CalledProcessError as e:
-        print(f"{parser_prefix} Tracepath Error: {e.stderr}")
+        logger.error(f"{parser_prefix} Tracepath Error: {e.stderr}")
 
 
 def parse_args():
@@ -206,12 +208,13 @@ def parse_args():
 def capture_tracepath_packets(args):
     ready = threading.Event()
     sniffer = AsyncSniffer(
+        filter="icmp6",
         iface=args.interface,
         timeout=30,
         store=True,
         started_callback=lambda: ready.set(),
     )
-    print(f"{parser_prefix} Starting Scapy sniffer")
+    logger.info(f"Starting Scapy Sniffer")
     sniffer.start()
     ready.wait()
 
@@ -220,7 +223,7 @@ def capture_tracepath_packets(args):
     sniffer.stop()
     sniffer.join()
     packets = sniffer.results
-    print(f"{parser_prefix} Scapy sniffer closed, {len(packets)} packets found")
+    logger.info(f"Scapy Sniffer Closed, {len(packets)} Packets Found")
     return packets
 
 
@@ -234,7 +237,7 @@ def get_packets(args):
 
 
 def parse_packets(packets) -> list[IOAMPacketInfo]:
-    print(f"{parser_prefix} Parsing {len(packets)} packets for IOAM data...")
+    logger.info(f"Parsing {len(packets)} ICMP Packets for IOAM Data...")
 
     ioam_info_array = []
     for i, pkt in enumerate(packets):
@@ -242,27 +245,50 @@ def parse_packets(packets) -> list[IOAMPacketInfo]:
         if ioam_info:
             ioam_info_array.append(ioam_info)
 
-    print(f"{parser_prefix} found IOAM data in {len(ioam_info_array)} packets")
+    logger.info(f"Found IOAM Data in {len(ioam_info_array)} Packets")
     return ioam_info_array
 
 
-def print_ioam_info(info_array):
+def print_ioam_info(info_array: list[IOAMPacketInfo]):
+    if len(info_array) <= 0:
+        return
     with open("ioam_data.txt", "w") as f:
-        original_stdout = sys.stdout
-        sys.stdout = f
-
+        logger.info(f"Writing Output to {f.name}")
         for pkt in info_array:
-            print(pkt)
-        sys.stdout = original_stdout
+            print(pkt, file=f)
+            
 
-    print(f"{parser_prefix} Finished")
+class LogFormatter(logging.Formatter):
+    Colors = {
+        'INFO': "\033[93m",      # Yellow
+        'WARNING': "\033[95m",   # Magenta
+        'ERROR': "\033[91m",     # Red
+    }
+    End = "\033[0m"
+
+    def format(self, record):
+        color = self.Colors.get(record.levelname, "")
+        record.levelname = f"{color}{record.levelname}{self.End}"
+        record.msg = f"{record.msg}"
+        return super().format(record)
+
+
+def logger_setup():
+    logger.setLevel(logging.INFO)
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(LogFormatter("[%(name)s][%(levelname)s] %(message)s"))
+    logger.handlers = [sh]
+    logger.info("Logger Setup Complete")
 
 
 def main():
+    logger_setup()
     args = parse_args()
     packets = get_packets(args)
     ioam_info_array = parse_packets(packets)
     print_ioam_info(ioam_info_array)
+    logger.info("Finished")
 
 
 if __name__ == "__main__":

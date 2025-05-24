@@ -24,8 +24,6 @@
 
 source lib.sh
 
-leader="[netns emulation] "
-
 ALPHA=(
 	1					# ID
 	11111111				# Wide ID
@@ -91,9 +89,14 @@ GAMMA=(
 	"World there -Obi"
 )
 
+magenta="\e[35m"
+lime="\e[92m"
+color_end="\e[0m"
+leader="[netns][${magenta}Emulation${color_end}] "
+
 check_kernel_compatibility()
 {
-  echo -n $leader"IOAM Compatibility Check: "
+  echo -n -e $leader"IOAM Compatibility Check... "
 
   setup_ns ioam_tmp_node
   ip link add name veth0 netns $ioam_tmp_node type veth \
@@ -159,7 +162,7 @@ check_kernel_compatibility()
     fi
   fi
 
-  echo "SUCCESS" 
+  echo -e ${lime}"SUCCESS"${color_end} 
 }
 
 cleanup()
@@ -177,7 +180,7 @@ cleanup()
 
 setup()
 {
-  echo -n $leader"Setup: "
+  echo -n -e $leader"Setup... "
   setup_ns ioam_node_alpha ioam_node_r1 ioam_node_r2 ioam_node_r3 ioam_node_gamma
 
   # connect namespaces
@@ -308,7 +311,7 @@ setup()
     exit 0
   fi
 
-  echo "SUCCESS"
+  echo -e ${lime}"SUCCESS"${color_end}
 }
 
 check_kernel_compatibility
@@ -316,11 +319,11 @@ setup
 
 sleep 0.1
 
-ip netns exec $ioam_node_alpha sudo timeout 7s tcpdump -i any -w alpha.pcap &
+ip netns exec $ioam_node_alpha sudo timeout 7s tcpdump -i any -w alpha.pcap &>/dev/null &
 PID_ALPHA=$!
 
 sleep 0.1
-ip netns exec $ioam_node_gamma sudo timeout 7s tcpdump -i any -w gamma.pcap &
+ip netns exec $ioam_node_gamma sudo timeout 7s tcpdump -i any -w gamma.pcap &>/dev/null &
 PID_GAMMA=$!
 
 sleep 0.1

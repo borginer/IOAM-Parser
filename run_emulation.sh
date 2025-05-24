@@ -5,7 +5,7 @@ for file in "gamma.pcap" "alpha.pcap"; do
 done
 
 
-./IOAM_net_emulation.sh
+./netns_ioam_emulation.sh
 
 sleep 1
 
