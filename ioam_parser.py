@@ -64,7 +64,7 @@ class TraceFieldEnum(Enum):
             case TraceFieldEnum.TIMESTAMP_SECS:  # timestamp sec
                 s += f"{datetime.fromtimestamp(int.from_bytes(value))}\n"
             case TraceFieldEnum.TIMESTAMP_FRAC:  # timestamp frac
-                s += f"{int.from_bytes(value) / 2**32:.12f}s\n"
+                s += f"{int.from_bytes(value) / 2**32:.9f}s\n"
             case TraceFieldEnum.INGRESS_EGRESS_IF_ID_WIDE:
                 Ingress = "".join(f"{b:02x}" for b in value[0:4])
                 Egress = "".join(f"{b:02x}" for b in value[4:9])

@@ -300,7 +300,7 @@ setup()
 
   ip -netns $ioam_node_alpha route del db04::/64
   ip -netns $ioam_node_alpha route add db04::/64 via db01::1 encap ioam6 mode inline \
-         trace prealloc type 0xFFF000 ns 123 size 200 dev veth0
+         trace prealloc type 0xBC1000 ns 123 size 200 dev veth0
 
   sleep 0.1
 
@@ -322,10 +322,6 @@ sleep 0.1
 
 ip netns exec $ioam_node_alpha sudo timeout 7s tcpdump -i any -w alpha.pcap &>/dev/null &
 PID_ALPHA=$!
-
-sleep 0.1
-ip netns exec $ioam_node_gamma sudo timeout 7s tcpdump -i any -w gamma.pcap &>/dev/null &
-PID_GAMMA=$!
 
 sleep 0.1
 
