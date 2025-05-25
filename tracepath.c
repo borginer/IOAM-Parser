@@ -54,6 +54,7 @@
         fflush(ctl->raw_output); \
     } \
 } while (0)
+#define MAX_IOAM_HOPS 8
 
 enum {
 	MAX_PROBES = 10,
@@ -85,7 +86,20 @@ struct probehdr {
 	uint32_t ttl;
 	struct timespec ts;
 };
-
+struct ioam_values {
+    uint8_t node_id;
+    uint8_t hoplim;  
+    uint32_t timestamp;
+    uint32_t timestamp_frac;
+    float latency_ms;
+    uint32_t queue_depth;
+    uint16_t ingress_if_short; 
+    uint16_t egress_if_short;   
+    uint32_t ingress_if_wide;   
+    uint32_t egress_if_wide;    
+    uint32_t namespace_specific; 
+    uint32_t checksum_comp;
+};
 struct run_state {
 	struct hhistory his[HIS_ARRAY_SIZE];
 	int hisptr;
@@ -103,11 +117,16 @@ struct run_state {
 	int hops_from;
 	int icmp6_fd; // raw ICMPv6 socket
 	FILE *raw_output;
+	struct ioam_values hops[MAX_IOAM_HOPS];
+    int count;
+    uint32_t trace_type;
 	unsigned int
 		no_resolve:1,
 		show_both:1,
 		mapped:1;
 };
+
+
 int recv_icmp6_raw(struct run_state *ctl);
 ssize_t receive_raw_packet(int sock_fd, uint8_t *buf, size_t bufsize, struct sockaddr_in6 *addr, socklen_t *addrlen);
 void log_raw_packet(struct run_state *ctl, const uint8_t *buf, ssize_t len);
@@ -118,6 +137,8 @@ uint8_t *get_hbh_end(const uint8_t *ptr);
 void log_hbh_header_length(struct run_state *ctl, const uint8_t *ptr);
 void parse_ioam_option(struct run_state *ctl, uint8_t *opt_ptr, uint8_t opt_len);
 void parse_hbh_options(struct run_state *ctl, uint8_t *ptr, uint8_t *end, uint8_t *buf_end);
+void print_ioam_hop(struct run_state *ctl,int hop, const char *addr, uint32_t trace_type, struct ioam_values *v);
+void print_ioam_hops_for_ttl(struct run_state *ctl);
 /* Field bitmask and size definitions (24-bit trace_type) */
 struct ioam_field {
     uint32_t bit;
@@ -247,19 +268,19 @@ static int recverr(struct run_state *const ctl)
 	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
 		switch (cmsg->cmsg_level) {
 		case SOL_IPV6:
-			printf("SOL_IPV6\n");
+			//printf("SOL_IPV6\n");
 			switch (cmsg->cmsg_level) {
 			case IPV6_RECVERR:
-				printf("IPV6_RECVERR\n");
+				//printf("IPV6_RECVERR\n");
 
 				e = (struct sock_extended_err *)CMSG_DATA(cmsg);
 				break;
 			case IPV6_HOPLIMIT:
-			printf("IPV6_HOPLIMIT\n");
+			//printf("IPV6_HOPLIMIT\n");
 
 	#ifdef IPV6_2292HOPLIMIT
 			case IPV6_2292HOPLIMIT:
-			printf("IPV6_2292HOPLIMIT\n");
+			//printf("IPV6_2292HOPLIMIT\n");
 
 	#endif
 				memcpy(&rethops, CMSG_DATA(cmsg), sizeof(rethops));
@@ -268,16 +289,16 @@ static int recverr(struct run_state *const ctl)
 				unsigned char *data = (unsigned char *)CMSG_DATA(cmsg);
 				size_t len = cmsg->cmsg_len - CMSG_LEN(0);
 	
-				printf("cmsg6:%d, data length: %zu, first bytes: ", cmsg->cmsg_type, len);
+				//printf("cmsg6:%d, data length: %zu, first bytes: ", cmsg->cmsg_type, len);
 				for (size_t i = 0; i < len && i < 8; ++i) {
-					printf("0x%02x ", data[i]);
+					//printf("0x%02x ", data[i]);
 				}
-				printf("\n");
+				//printf("\n");
 				uint8_t *data_start = (uint8_t *)CMSG_DATA(cmsg);
 				size_t data_len = cmsg->cmsg_len - CMSG_LEN(0);
 			
 				if (data_len < sizeof(struct sock_extended_err)) {
-					printf("CMSG too short to contain sock_extended_err\n");
+					//printf("CMSG too short to contain sock_extended_err\n");
 					break;
 				}
 			
@@ -285,14 +306,14 @@ static int recverr(struct run_state *const ctl)
 				uint8_t *embedded = data_start + sizeof(struct sock_extended_err);
 				size_t embedded_len = data_len - sizeof(struct sock_extended_err);
 			
-				printf(">>> Embedded ICMP payload (%zu bytes):\n", embedded_len);
+				//printf(">>> Embedded ICMP payload (%zu bytes):\n", embedded_len);
 				for (size_t i = 0; i < embedded_len && i < 64; i++) {
-					printf("0x%02x ", embedded[i]);
+					//printf("0x%02x ", embedded[i]);
 					if (i % 8 == 7) printf("\n");
 				}
-				printf("\n");
+				//printf("\n");
 				if (len > 0 && data[0] == 0x0e) {
-					printf(">> IOAM Option Detected (0x0E) \n");
+					//printf(">> IOAM Option Detected (0x0E) \n");
 				}
 				break;
 			}
@@ -303,7 +324,7 @@ static int recverr(struct run_state *const ctl)
 			switch (cmsg->cmsg_type) {
 			case IP_RECVERR:
 				e = (struct sock_extended_err *)CMSG_DATA(cmsg);
-				printf("IP_RECVERR\n");
+				//printf("IP_RECVERR\n");
 				break;
 			case IP_TTL:
 				rethops = *(uint8_t *)CMSG_DATA(cmsg);
@@ -313,11 +334,11 @@ static int recverr(struct run_state *const ctl)
 				unsigned char *data = (unsigned char *)CMSG_DATA(cmsg);
 				size_t len = cmsg->cmsg_len - CMSG_LEN(0);
 	
-				printf("cmsg4:%d, data length: %zu, first bytes: ", cmsg->cmsg_type, len);
+				//printf("cmsg4:%d, data length: %zu, first bytes: ", cmsg->cmsg_type, len);
 				for (size_t i = 0; i < len && i < 8; ++i) {
-					printf("0x%02x ", data[i]);
+					//printf("0x%02x ", data[i]);
 				}
-				printf("\n");
+				//printf("\n");
 				break;
 			}
 			}
@@ -420,6 +441,7 @@ static int recverr(struct run_state *const ctl)
 					printf(_("asymm %2d "), rethops);
 			}
 			printf("\n");
+			print_ioam_hops_for_ttl(ctl);
 			break;
 		}
 		printf("!H\n");
@@ -463,21 +485,17 @@ static int probe_ttl(struct run_state *const ctl)
 		ctl->his[ctl->hisptr].hops = ctl->ttl;
 		ctl->his[ctl->hisptr].sendtime = hdr->ts;
 		//TEST IOAM SUPPORT
-		if (ctl->icmp6_fd > 0){
-			int ret_raw = recv_icmp6_raw(ctl);
-				if (ret_raw == 0) {
-					printf("[raw socket] IOAM HBH detected in ICMPv6 reply!\n");
-				}
-				else{
-					printf("IOAM HBH NOT FOUND\n\n\n");
-				}
-			}
-			else{
-				printf("failed\n\n\n");
-			}
 		if (sendto(ctl->socket_fd, ctl->pktbuf, ctl->mtu - ctl->overhead, 0,
-			   (struct sockaddr *)&ctl->target, ctl->targetlen) > 0)
+           (struct sockaddr *)&ctl->target, ctl->targetlen) > 0)
+		{
+			if (ctl->icmp6_fd > 0) {
+				int ret_raw = recv_icmp6_raw(ctl);
+				if (ret_raw == 0) {
+					// IOAM HBH successfully parsed
+				}
+			}
 			break;
+		}
 		res = recverr(ctl);
 
 		ctl->his[ctl->hisptr].hops = 0;
@@ -848,142 +866,73 @@ void log_hbh_header_length(struct run_state *ctl,const uint8_t *ptr) {
  * @param opt_ptr Pointer to the IOAM option data.
  * @param opt_len Length of the IOAM option.
  */
-void parse_ioam_option(struct run_state *ctl, uint8_t *opt_ptr, uint8_t opt_len) {
-    const int OFFSET_HEADER = 10;  // Reserved (1), Type (1), Namespace ID (2), Flags (1), RemLen (1), TraceType (3), Reserved (1)
+void parse_ioam_option(struct run_state *ctl, uint8_t *opt_ptr, uint8_t opt_len)
+{
+    const int HDR_OFF = 10;   /* bytes before first trace element */
 
-    RAWLOG("  [Raw IOAM Option (%u bytes)]:", opt_len);
-    for (int i = 0; i < opt_len; i++) {
-        if (i % 16 == 0) RAWLOG("\n    ");
-        RAWLOG("%02x ", opt_ptr[i]);
-    }
-    RAWLOG("\n");
+    /* --- option-level header ------------------------------------ */
+    uint8_t  *d        = opt_ptr;
+    uint32_t trace_type = (d[6] << 16) | (d[7] << 8) | d[8];
+    uint16_t ns_id      = (d[2] << 8) | d[3];
+    size_t   node_len   = 4 * ((d[4] & 0xF8) >> 3);
+    size_t   rem_len    = 4 * (d[5] & 0x7F);
 
-    uint8_t *ioam_data = opt_ptr;
+    RAWLOG("[IOAM] ns_id=%u  trace_type=0x%06x\n", ns_id, trace_type);
 
-    uint8_t option_type = ioam_data[1];
-    uint16_t ns_id = (ioam_data[2] << 8) | ioam_data[3];
+    uint8_t *node_array   = d + HDR_OFF + rem_len;
+    size_t   node_bytes   = opt_len - (node_array - d);
+    size_t   hop_cnt      = node_len ? (node_bytes / node_len) : 0;
 
-    uint8_t flags_and_node_len = ioam_data[4];
-    size_t node_len = 4 * ((flags_and_node_len & 0xF8) >> 3);  // Top 5 bits
+    for (size_t hop = 0; hop < hop_cnt; ++hop)
+	{
+		uint8_t *p = node_array + hop * node_len;
+		struct ioam_values v = {0};
+		size_t idx = 0;
 
-    uint8_t rem_len_raw = ioam_data[5];
-    size_t remaining_length = 4 * (rem_len_raw & 0x7F);  // Bottom 7 bits
-
-    uint32_t trace_type = (ioam_data[6] << 16) |
-                          (ioam_data[7] << 8) |
-                          ioam_data[8];
-
-    RAWLOG("  [*] ns_id=%u, trace_type=0x%06x, node_len=%zu, rem_len=%zu\n",
-           ns_id, trace_type, node_len, remaining_length);
-
-    struct {
-        uint32_t bit;
-        const char *name;
-        size_t size;
-    } IOAM_FIELDS[] = {
-        { 0x800000, "hop_lim_node_id_short",       4 }, // Special case
-        { 0x400000, "ingress_egress_if_id_short",  4 },
-        { 0x200000, "timestamp_secs",              4 },
-        { 0x100000, "timestamp_frac",              4 },
-        { 0x080000, "transit_delay",               4 },
-        { 0x040000, "namespace_specific_short",    4 },
-        { 0x020000, "queue_depth",                 4 },
-        { 0x010000, "checksum_complement",         4 },
-        { 0x008000, "hop_lim_node_id_wide",        8 },
-        { 0x004000, "ingress_egress_if_id_wide",   8 },
-        { 0x002000, "namespace_specific_wide",     8 },
-        { 0x001000, "buffer_occupancy",            4 },
-        { 0x000004, "app_data",                    4 },
-    };
-
-    uint8_t *data_start = ioam_data + OFFSET_HEADER;
-    uint8_t *node_array = data_start + remaining_length;
-    size_t node_array_len = opt_len - (node_array - ioam_data);
-
-    if (node_array_len % node_len != 0) {
-        RAWLOG("  [!] Node array length (%zu) not aligned with node_len (%zu)\n", node_array_len, node_len);
-    }
-
-    size_t hop_count = node_array_len / node_len;
-    RAWLOG("  [*] Found %zu node(s)\n", hop_count);
-
-    int hop = 0;
-    for (size_t offset = 0; offset + node_len <= node_array_len; offset += node_len) {
-        uint8_t *p = node_array + offset;
-
-        bool all_zero = true;
-        for (size_t j = 0; j < node_len; j++) {
-            if (p[j] != 0) {
-                all_zero = false;
-                break;
-            }
-        }
-
-        if (all_zero) {
-            RAWLOG("  [*] Zero-filled node at offset %zu\n", offset);
-            break;
-        }
-
-        RAWLOG("  [Raw Hop %02d]:", hop);
-        for (size_t j = 0; j < node_len; j++) {
-            if (j % 16 == 0) RAWLOG("\n    ");
-            RAWLOG("%02x ", p[j]);
-        }
-        RAWLOG("\n");
-
-        RAWLOG("  [Hop %02d] ", hop);
-        size_t idx = 0;
-        for (size_t i = 0; i < sizeof(IOAM_FIELDS) / sizeof(IOAM_FIELDS[0]); i++) {
-			if (trace_type & IOAM_FIELDS[i].bit) {
-				if (IOAM_FIELDS[i].bit == 0x800000) {
-					// hop_lim_node_id_short
-					uint8_t hoplim = p[idx++];
-					idx++;  // skip reserved
-					uint16_t node_id = (p[idx] << 8) | p[idx + 1];  // Big-endian
-					idx += 2;
-					RAWLOG("hop_lim=%u node_id=%u ", hoplim, node_id);
-				}else if (IOAM_FIELDS[i].bit == 0x400000) {
-					// ingress_egress_if_id_short
-					uint16_t ingress_if = (p[idx] << 8) | p[idx + 1];
-					uint16_t egress_if  = (p[idx + 2] << 8) | p[idx + 3];
-					idx += 4;
-					RAWLOG("ingress_if=%u egress_if=%u ", ingress_if, egress_if);
-				}else if (IOAM_FIELDS[i].bit == 0x004000) {
-					uint32_t ingress_if = 0;
-					uint32_t egress_if = 0;
-					for (int b = 0; b < 4; b++) ingress_if = (ingress_if << 8) | p[idx++];
-					for (int b = 0; b < 4; b++) egress_if = (egress_if << 8) | p[idx++];
-					RAWLOG("ingress_if_wide=%u egress_if_wide=%u ", ingress_if, egress_if);
-				} else {
-					// Default: treat all multi-byte fields as big-endian
-					uint32_t val = 0;
-					for (size_t b = 0; b < IOAM_FIELDS[i].size; b++) {
-						val = (val << 8) | p[idx++];  // Big-endian
-					}
-					RAWLOG("%s=%u ", IOAM_FIELDS[i].name, val);
-				}
-			}
+		if (trace_type & 0x800000) {  // HopLim + NodeID
+			v.hoplim   = p[idx++];
+			idx++;  // reserved
+			v.node_id  = (p[idx] << 8) | p[idx + 1];
+			idx += 2;
 		}
-        RAWLOG("\n");
+		if (trace_type & 0x400000) {  // ingress/egress (short)
+			v.ingress_if_short = (p[idx] << 8) | p[idx + 1];
+			v.egress_if_short  = (p[idx + 2] << 8) | p[idx + 3];
+			idx += 4;
+		}
+		if (trace_type & 0x004000) {  // ingress/egress (wide)
+			v.ingress_if_wide = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			v.egress_if_wide  = (p[idx + 4] << 24) | (p[idx + 5] << 16) | (p[idx + 6] << 8) | p[idx + 7];
+			idx += 8;
+		}
+		if (trace_type & 0x200000) {  // timestamp secs
+			v.timestamp = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			idx += 4;
+		}
+		if (trace_type & 0x100000) {  // timestamp frac
+			v.timestamp_frac = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			idx += 4;
+		}
+		if (trace_type & 0x080000) {  // transit delay
+			uint32_t delay = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			v.latency_ms = delay / 1000.0f;
+			idx += 4;
+		}
+		if (trace_type & 0x020000) {  // queue depth
+			v.queue_depth = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			idx += 4;
+		}
+		if (trace_type & 0x040000) {  // namespace-specific short
+			v.namespace_specific = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			idx += 4;
+		}
+		if (trace_type & 0x010000) {  // checksum complement
+			v.checksum_comp = (p[idx] << 24) | (p[idx + 1] << 16) | (p[idx + 2] << 8) | p[idx + 3];
+			idx += 4;
+		}
 
-        hop++;
-    }
-
-    size_t parsed = hop * node_len;
-    size_t trailing = node_array_len - parsed;
-    if (trailing > 0) {
-        bool only_padding = true;
-        for (size_t i = 0; i < trailing; i++) {
-            if (node_array[parsed + i] != 0) {
-                only_padding = false;
-                break;
-            }
-        }
-        if (only_padding)
-            RAWLOG("  [*] %zu trailing zero-padding byte(s) ignored\n", trailing);
-        else
-            RAWLOG("  [!] %zu unparsed bytes with non-zero content\n", trailing);
-    }
+		print_ioam_hop(ctl, (int)hop, "", trace_type, &v);
+	}
 }
 
 
@@ -1010,4 +959,79 @@ void parse_hbh_options(struct run_state *ctl,uint8_t *ptr, uint8_t *end, uint8_t
         ptr += 2 + opt_len;
     }
     RAWLOG("\n");
+}
+void print_ioam_hop(struct run_state *ctl, int hop, const char *addr, uint32_t trace_type, struct ioam_values *v) {
+    int ttl_index = ctl->ttl - 1;
+    if (ttl_index >= 0 && ttl_index < HIS_ARRAY_SIZE) {
+        if (ctl->count < MAX_IOAM_HOPS) {
+			ctl->hops[ctl->count++] = *v;
+			ctl->trace_type = trace_type;
+		}
+    }
+}
+void print_ioam_hop_log(struct run_state *ctl,int hop, const char *addr, uint32_t trace_type, struct ioam_values *v) {
+    RAWLOG("%2d:  %s\n", hop + 1, addr);
+
+    RAWLOG("IOAM:");
+    if (trace_type & 0x800000) {
+        RAWLOG(" NodeID=%u", v->node_id);
+    }
+    if (trace_type & 0x200000) {
+        RAWLOG(" Timestamp=%u", v->timestamp);
+    }
+    if (trace_type & 0x100000) {
+        RAWLOG(" TimestampFrac=%u", v->timestamp_frac);
+    }
+    if (trace_type & 0x080000) {
+        RAWLOG(" Latency=%.1fms", v->latency_ms);
+    }
+    if (trace_type & 0x020000) {
+        RAWLOG(" QueueDepth=%u", v->queue_depth);
+    }
+    if (trace_type & 0x400000) {
+        RAWLOG(" Ingress=%u Egress=%u", v->ingress_if_short, v->egress_if_short);
+    }
+    if (trace_type & 0x004000) {
+        RAWLOG(" IngressWide=%u EgressWide=%u", v->ingress_if_wide, v->egress_if_wide);
+    }
+    if (trace_type & 0x040000) {
+        RAWLOG(" NS_Short=%u", v->namespace_specific);
+    }
+    if (trace_type & 0x010000) {
+        RAWLOG(" ChecksumComp=%u", v->checksum_comp);
+    }
+    RAWLOG("\n");
+}
+
+void print_ioam_hops_for_ttl(struct run_state *ctl) {
+    if (ctl->count <= 0)
+        return;
+
+    for (int i = 0; i < ctl->count; ++i) {
+        struct ioam_values *v = &ctl->hops[i];
+        uint32_t trace_type = ctl->trace_type;
+
+        printf("     IOAM Hop %d:", i + 1);
+        if (trace_type & 0x800000)
+            printf(" NodeID=%u", v->node_id);
+        if (trace_type & 0x200000)
+            printf(" Timestamp=%u", v->timestamp);
+        if (trace_type & 0x100000)
+            printf(" TimestampFrac=%u", v->timestamp_frac);
+        if (trace_type & 0x080000)
+            printf(" Latency=%.1fms", v->latency_ms);
+        if (trace_type & 0x020000)
+            printf(" QueueDepth=%u", v->queue_depth);
+        if (trace_type & 0x400000)
+            printf(" Ingress=%u Egress=%u", v->ingress_if_short, v->egress_if_short);
+        if (trace_type & 0x004000)
+            printf(" IngressWide=%u EgressWide=%u", v->ingress_if_wide, v->egress_if_wide);
+        if (trace_type & 0x040000)
+            printf(" NS_Short=%u", v->namespace_specific);
+        if (trace_type & 0x010000)
+            printf(" ChecksumComp=%u", v->checksum_comp);
+        printf("\n");
+    }
+
+    ctl->count = 0;  // reset after printing to avoid duplicates
 }
