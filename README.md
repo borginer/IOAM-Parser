@@ -1,6 +1,6 @@
-# IPv6 IOAM Network Emulator
+# IPv6 IOAM Parser & Network Emulator
 
-This project emulates an IPv6 IOAM (In-situ Operations, Administration, and Maintenance) network using Linux network namespaces to simulate packet flows, inject IOAM headers, and parse trace information from live network traffic or `.pcap` files using Scapy.
+This project emulates an IPv6 IOAM (In-situ Operations, Administration, and Maintenance) network using Linux network namespaces to simulate packet flows and inject IOAM headers. Then parse trace information from live network traffic or `.pcap` files using Scapy.
 
 ## Features
 
@@ -14,7 +14,17 @@ This project emulates an IPv6 IOAM (In-situ Operations, Administration, and Main
 
 To run this project, ensure the following dependencies are installed:
 
-### 1. Python 3.13
+### 1. IOAM kernel flag
+
+Ensure your kernel has the `CONFIG_IPV6_IOAM6_LWTUNNEL=y` configuration
+
+Can check this by running:
+
+```bash
+grep CONFIG_IPV6_IOAM6_LWTUNNEL /boot/config-$(uname -r)
+```
+
+### 2. Python 3.13
 
 Ensure you are using **Python 3.13** or higher.
 
@@ -26,24 +36,18 @@ python3 --version
 
 If not installed, install it using the [official Python website](https://www.python.org/downloads/) or via your package manager.
 
-Example for Ubuntu (using deadsnakes PPA):
+Example for Ubuntu:
 
 ```bash
 sudo apt install python3
 ```
 
-### 2. Scapy 2.5
+### 3. Scapy 2.5
 
-Install Scapy version 2.5:
-
-```bash
-pip3 install scapy==2.5.0
-```
-
-If you don't have pip:
+Install Scapy version 2.5 or higher:
 
 ```bash
-sudo apt install python3-pip
+sudo apt install python3-scapy
 ```
 
 Verify installation:
@@ -52,9 +56,20 @@ Verify installation:
 python3 -c "import scapy; print(scapy.__version__)"
 ```
 
-### 3. tracepath
+### 4. iproute2
 
-The `tracepath` utility is required to generate IOAM traffic.
+`iproute2` provides the tools needed for Linux network namespaces
+
+Install on Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install iproute2
+```
+
+### 5. tracepath
+
+The `tracepath` utility is required to generate traffic.
 
 Install on Ubuntu:
 
@@ -72,13 +87,13 @@ tracepath --version
 
 ### Run the IOAM Network Emulation
 
-To simulate the IOAM network and generate traffic:
+To simulate the IOAM network and within it run the parser:
 
 ```bash
 sudo ./run_emulation.sh
 ```
 
-This creates a `alpha.pcap` file, which can be parsed using the parser script.
+This creates a `alpha.pcap` file, which can be parsed again using the parser script separately:
 
 ### Run the IOAM Parser
 
@@ -105,3 +120,4 @@ This project utilizes the following technologies:
 - Linux network namespaces
 - Scapy
 - iproute2 tracepath
+- Python3
