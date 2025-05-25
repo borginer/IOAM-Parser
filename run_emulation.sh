@@ -4,13 +4,4 @@ for file in "gamma.pcap" "alpha.pcap"; do
     [ -f "$file" ] && rm $file
 done
 
-
 ./netns_ioam_emulation.sh
-
-sleep 1
-
-
-
-# tshark -r gamma.pcap -T json > packets.json
-
-# jq -f filter.jq packets.json > filtered_ioam.json

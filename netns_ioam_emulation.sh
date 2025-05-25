@@ -90,6 +90,7 @@ GAMMA=(
 )
 
 magenta="\e[35m"
+red="\033[31m"
 lime="\e[92m"
 color_end="\e[0m"
 leader="[netns][${magenta}Emulation${color_end}] "
@@ -299,14 +300,14 @@ setup()
 
   ip -netns $ioam_node_alpha route del db04::/64
   ip -netns $ioam_node_alpha route add db04::/64 via db01::1 encap ioam6 mode inline \
-         trace prealloc type 0xBC8000 ns 123 size 156 dev veth0
+         trace prealloc type 0xFFF000 ns 123 size 200 dev veth0
 
   sleep 0.1
 
   ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null  
   if [ $? != 0 ]
   then
-    echo "FAILED"
+    echo -e ${red}"FAILED"${color_end}
     cleanup &>/dev/null
     exit 0
   fi
