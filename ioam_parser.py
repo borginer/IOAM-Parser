@@ -49,7 +49,6 @@ class TraceFieldEnum(Enum):
         self.size = size
 
     def field_str(self, value: bytes) -> str:
-        # TODO: add specific formats for relevant fields
         s = f"{self.field_name}: "
         match self:
             case TraceFieldEnum.HOP_LIM_NODE_ID_SHORT:

@@ -1,14 +1,10 @@
 # IPv6 IOAM Parser & Network Emulator
 
-This project emulates an IPv6 IOAM (In-situ Operations, Administration, and Maintenance) network using Linux network namespaces to simulate packet flows and inject IOAM headers. Then parse trace information from live network traffic or `.pcap` files using Scapy.
+This project provides an IOAM parser that can parse information from live network traffic or .pcap files.
 
-## Features
+The parser searches inside the icmp payload of ICMPv6TimeExceeded/ICMPv6DestUnreach packets.
 
-- Emulates a multi-node IPv6 network using `ip netns`
-- Configures IOAM namespaces, schemas, and trace types
-- Uses `tracepath` to generate hop-by-hop IOAM data
-- Captures and parses packets using Scapy
-- Outputs IOAM data in a structured format
+The project includes a network emulation using Linux network namespaces to simulate packet flows and inject IOAM headers.
 
 ## Dependencies and Setup
 
@@ -100,7 +96,7 @@ This creates a `alpha.pcap` file, which can be parsed again using the parser scr
 1. **Parse from `.pcap` file**:
 
 ```bash
-sudo python3 ioam_parser.py file.pcap
+sudo python3 ioam_parser.py alpha.pcap
 ```
 
 2. **Live capture on a network interface (for IPv6 destination)**:
