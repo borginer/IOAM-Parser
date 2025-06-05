@@ -304,7 +304,7 @@ setup()
 
   sleep 0.1
 
-  ip netns exec $ioam_node_alpha ping6 -c 5 -W 1 db04::2 &>/dev/null  
+  ip netns exec $ioam_node_alpha ping6 -c 15 -W 1 -i 0.1 db04::2 &>/dev/null 
   if [ $? != 0 ]
   then
     echo -e ${red}"FAILED"${color_end}
@@ -314,6 +314,10 @@ setup()
 
   echo -e ${lime}"SUCCESS"${color_end}
 }
+
+for file in "alpha.pcap"; do
+    [ -f "$file" ] && rm $file
+done
 
 check_kernel_compatibility
 setup

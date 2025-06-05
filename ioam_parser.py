@@ -1,4 +1,4 @@
-import subprocess, argparse, threading, ipaddress, copy, logging
+import subprocess, argparse, threading, ipaddress, copy, logging, time
 from datetime import datetime
 from enum import Enum
 
@@ -266,6 +266,7 @@ def capture_tracepath_packets(args):
 
     run_tracepath(args.input)
 
+    time.sleep(0.1)
     sniffer.stop()
     sniffer.join()
     packets = sniffer.results

@@ -90,7 +90,7 @@ tracepath --version
 To simulate the IOAM network and within it run the parser:
 
 ```bash
-sudo ./run_emulation.sh
+sudo ./netns_emu.sh
 ```
 
 This creates a `alpha.pcap` file, which can be parsed again using the parser script separately:
